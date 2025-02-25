@@ -7,10 +7,14 @@
 #include QMK_KEYBOARD_H
 #include <qp.h>
 #include "rsz_experience.qgf.h"
+#include "fira.qff.h"
 
 #define OLED_HEIGHT 64
 #define OLED_WIDTH 128
 #define OLED_I2C_ADDRESS 0x3c
+#define SCREEN_NUM_LINES 4
+#define SCREEN_NUM_CHARS 19
+#define SCREEN_BUFFER_LENGTH (SCREEN_NUM_CHARS * SCREEN_NUM_LINES + 1)
 
 enum custom_keycodes {
     KC_P00 = SAFE_RANGE
@@ -37,16 +41,57 @@ const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][NUM_DIRECTIONS] = {
     [_BASE_LAYER] = { ENCODER_CCW_CW(KC_VOLD, KC_VOLU), ENCODER_CCW_CW(MS_WHLU, MS_WHLD) }
 };
 
-painter_device_t oled_display;
+// HID Communication
 
-void keyboard_post_init_kb(void) {
-    painter_image_handle_t splash = qp_load_image_mem(gfx_rsz_experience);
-    qp_power(oled_display, 1);
-    oled_display = qp_sh1106_make_i2c_device(OLED_WIDTH, OLED_HEIGHT, OLED_I2C_ADDRESS);
-    qp_init(oled_display, QP_ROTATION_0);
-    qp_drawimage(oled_display, 0, 0, splash);
+uint8_t screen_data_buffer[SCREEN_BUFFER_LENGTH - 1] = {0};
+uint8_t temp_data_buffer[SCREEN_BUFFER_LENGTH - 1] = {0};
+bool display_updated = false;
+int current_line_number = 0;
+painter_device_t oled_display;
+painter_font_handle_t fira;
+
+void raw_hid_receive(uint8_t *data, uint8_t length) {
+    memcpy((char *)&temp_data_buffer[current_line_number * SCREEN_NUM_CHARS], data, SCREEN_NUM_CHARS);
+    current_line_number++;
+    if (current_line_number > 3) {
+        memcpy(screen_data_buffer, temp_data_buffer, SCREEN_BUFFER_LENGTH - 1);
+        current_line_number = 0;
+        memset(temp_data_buffer, 0, sizeof(temp_data_buffer));
+        display_updated = true;
+    }
 }
 
+void keyboard_post_init_kb(void) {
+//    painter_image_handle_t splash = qp_load_image_mem(gfx_rsz_experience);
+    oled_display = qp_sh1106_make_i2c_device(OLED_WIDTH, OLED_HEIGHT, OLED_I2C_ADDRESS);
+    fira = qp_load_font_mem(font_fira);
+    qp_power(oled_display, 1);
+    qp_init(oled_display, QP_ROTATION_0);
+}
+
+void display_write(char* text, int line_number) {
+    qp_drawtext(oled_display, 0, line_number * 16, fira, text);
+}
+
+void housekeeping_task_user(void) {
+    if (display_updated) {
+        qp_power(oled_display, 1);
+        for (int i = 0; i < 4; i++) {
+            display_write((char *)&screen_data_buffer[i* SCREEN_NUM_CHARS], i);
+        }
+        display_updated = false;
+    }
+}
+
+bool shutdown_user(bool jump_to_bootloader) {
+    if (jump_to_bootloader) {
+        display_write("Awaiting Firmware", 0);
+    } else {
+        display_write("Rebooting", 0);
+    }
+    qp_flush(oled_display);
+    return false;
+}
 
 bool process_record_user(uint16_t keycode, keyrecord_t *record) {
     if (record->event.pressed) {
