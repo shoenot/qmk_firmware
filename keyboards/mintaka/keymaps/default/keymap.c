@@ -3,9 +3,14 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include QMK_KEYBOARD_H
-#define SERIAL_SCREEN_BUFFER_LENGTH (/*SSD1306_MatrixCols*/21 * /*SSD1306_MatrixRows*/8 + /*Extra IsEnabledBit*/1)
-#define SCREEN_NUM_LINES 8
+#include <qp.h>
+#include "rsz_experience.qgf.h"
+
+#define OLED_HEIGHT 64
+#define OLED_WIDTH 128
+#define OLED_I2C_ADDRESS 0x3c
 
 enum custom_keycodes {
     KC_P00 = SAFE_RANGE
@@ -32,43 +37,16 @@ const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][NUM_DIRECTIONS] = {
     [_BASE_LAYER] = { ENCODER_CCW_CW(KC_VOLD, KC_VOLU), ENCODER_CCW_CW(MS_WHLU, MS_WHLD) }
 };
 
-uint8_t screen_data_buffer[SERIAL_SCREEN_BUFFER_LENGTH - 1] = {0};
-int oled_line_number = 0;
+painter_device_t oled_display;
 
-void raw_hid_receive(uint8_t *data, uint8_t length) {
-    memcpy((char *)&screen_data_buffer[oled_line_number * 21], data, 20);
-    screen_data_buffer[oled_line_number * 21 - 1] = '\n';
-    oled_line_number = (oled_line_number + 1) % SCREEN_NUM_LINES;
-    oled_on();
+void keyboard_post_init_kb(void) {
+    painter_image_handle_t splash = qp_load_image_mem(gfx_rsz_experience);
+    qp_power(oled_display, 1);
+    oled_display = qp_sh1106_make_i2c_device(OLED_WIDTH, OLED_HEIGHT, OLED_I2C_ADDRESS);
+    qp_init(oled_display, QP_ROTATION_0);
+    qp_drawimage(oled_display, 0, 0, splash);
 }
 
-void render_text(void) {
-    oled_write((char *)&screen_data_buffer, false);
-}
-
-bool oled_task_user(void) {
-    render_text();
-    return false;
-}
-
-void oled_render_boot(bool bootloader) {
-    oled_clear();
-    for (int i = 0; i < 16; i++) {
-        oled_set_cursor(0, i);
-        if (bootloader) {
-            oled_write_P(PSTR("Awaiting New Firmware "), false);
-        } else {
-            oled_write_P(PSTR("Rebooting "), false);
-        }
-    }
-
-    oled_render_dirty(true);
-}
-
-bool shutdown_user(bool jump_to_bootloader) {
-    oled_render_boot(jump_to_bootloader);
-    return false;
-}
 
 bool process_record_user(uint16_t keycode, keyrecord_t *record) {
     if (record->event.pressed) {
