@@ -7,7 +7,8 @@
 #include QMK_KEYBOARD_H
 #include <qp.h>
 #include "rsz_experience.qgf.h"
-#include "fira.qff.h"
+#include "jetbrains.qff.h"
+#include "jetbrains_big.qff.h"
 
 #define OLED_HEIGHT 64
 #define OLED_WIDTH 128
@@ -43,51 +44,75 @@ const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][NUM_DIRECTIONS] = {
 
 // HID Communication
 
-uint8_t screen_data_buffer[SCREEN_BUFFER_LENGTH - 1] = {0};
-uint8_t temp_data_buffer[SCREEN_BUFFER_LENGTH - 1] = {0};
+char screen_data_buffer[SCREEN_BUFFER_LENGTH - 1] = {0};
+char temp_data_buffer[SCREEN_BUFFER_LENGTH - 1] = {0};
 bool display_updated = false;
 int current_line_number = 0;
 painter_device_t oled_display;
-painter_font_handle_t fira;
+painter_font_handle_t display_font;
+painter_font_handle_t display_font_big;
+painter_image_handle_t boot_splash;
+
+void text_to_buffer(char *text, char *buffer, int length, int line_number) {
+    memset(&buffer[line_number * SCREEN_NUM_CHARS], 0, SCREEN_NUM_CHARS);
+    memcpy(&buffer[line_number * SCREEN_NUM_CHARS], text, length);
+}
+
+void clear_buffer(char *buffer) {
+    memset(&buffer, 0, sizeof(buffer));
+}
 
 void raw_hid_receive(uint8_t *data, uint8_t length) {
-    memcpy((char *)&temp_data_buffer[current_line_number * SCREEN_NUM_CHARS], data, SCREEN_NUM_CHARS);
+    text_to_buffer((char *)data, temp_data_buffer, SCREEN_NUM_CHARS, current_line_number);
     current_line_number++;
     if (current_line_number > 3) {
-        memcpy(screen_data_buffer, temp_data_buffer, SCREEN_BUFFER_LENGTH - 1);
+        clear_buffer(screen_data_buffer);
+        memcpy(screen_data_buffer, temp_data_buffer, sizeof(temp_data_buffer));
         current_line_number = 0;
-        memset(temp_data_buffer, 0, sizeof(temp_data_buffer));
+        clear_buffer(temp_data_buffer);
         display_updated = true;
     }
 }
 
 void keyboard_post_init_kb(void) {
-//    painter_image_handle_t splash = qp_load_image_mem(gfx_rsz_experience);
+    boot_splash = qp_load_image_mem(gfx_rsz_experience);
     oled_display = qp_sh1106_make_i2c_device(OLED_WIDTH, OLED_HEIGHT, OLED_I2C_ADDRESS);
-    fira = qp_load_font_mem(font_fira);
+    display_font = qp_load_font_mem(font_jetbrains);
+    display_font_big = qp_load_font_mem(font_jetbrains_big);
     qp_power(oled_display, 1);
     qp_init(oled_display, QP_ROTATION_0);
+    qp_drawimage(oled_display, 0, 0, boot_splash);
 }
 
-void display_write(char* text, int line_number) {
-    qp_drawtext(oled_display, 0, line_number * 16, fira, text);
+
+void display_write(void) {
+    qp_clear(oled_display);
+    for (int i = 0; i < 4; i++) {
+        qp_drawtext(oled_display, 0, i * 16, display_font, (char *)&screen_data_buffer[i * SCREEN_NUM_CHARS]);
+    }
+}
+
+void display_write_big(void) {
+    // Only does the first two lines, in big font.
+    qp_clear(oled_display);
+    for (int i = 0; i < 2; i++) {
+        qp_drawtext(oled_display, 0, i * 32, display_font_big, (char *)&screen_data_buffer[i * SCREEN_NUM_CHARS]);
+    }
 }
 
 void housekeeping_task_user(void) {
     if (display_updated) {
         qp_power(oled_display, 1);
-        for (int i = 0; i < 4; i++) {
-            display_write((char *)&screen_data_buffer[i* SCREEN_NUM_CHARS], i);
-        }
+        display_write();
         display_updated = false;
     }
 }
 
 bool shutdown_user(bool jump_to_bootloader) {
     if (jump_to_bootloader) {
-        display_write("Awaiting Firmware", 0);
-    } else {
-        display_write("Rebooting", 0);
+        text_to_buffer("Awaiting", screen_data_buffer, 8, 0);
+        text_to_buffer("Firmware", screen_data_buffer, 8, 1);
+        display_write_big();
     }
     qp_flush(oled_display);
     return false;

@@ -5,11 +5,11 @@
 //    format         | mono2
 //    unicode_glyphs | 
 //    output         | shurjo
-//    input          | fira.png
+//    input          | jetbrains.png
 
 #pragma once
 
 #include <qp.h>
 
-extern const uint32_t font_fira_length;
-extern const uint8_t  font_fira[1175];
+extern const uint32_t font_jetbrains_length;
+extern const uint8_t  font_jetbrains[1461];
