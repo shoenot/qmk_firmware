@@ -12,7 +12,6 @@ enum custom_keycodes {
     ENC_DEC
 };
 
-
 enum layer_names {
     _BASE_LAYER
 };
