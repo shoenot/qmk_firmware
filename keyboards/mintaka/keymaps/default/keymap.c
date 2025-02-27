@@ -43,7 +43,6 @@ void keyboard_post_init_kb(void) {
 
 void housekeeping_task_user(void) {
     check_hid_timeout();
-    check_screen_timeout();
 }
 
 bool shutdown_user(bool jump_to_bootloader) {
@@ -61,7 +60,11 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
                 enc_counter(true);
                 return false;
         }
-        process_timeout();
+        wake_from_screen_timeout();
     }
     return true;
+}
+
+void post_encoder_update_user(uint8_t index, bool clockwise) {
+    wake_from_screen_timeout();
 }

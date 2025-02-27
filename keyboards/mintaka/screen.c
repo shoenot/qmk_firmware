@@ -7,12 +7,14 @@
 #include "jetbrains_big.qff.h"
 #include QMK_KEYBOARD_H
 
-char screen_data_buffer[SCREEN_BUFFER_LENGTH - 1] = {0};
-char temp_data_buffer[SCREEN_BUFFER_LENGTH - 1] = {0};
+// HID related variables
+char screen_data_buffer[SCREEN_BUFFER_LENGTH - 1] = {0}; // The main buffer that gets printed to the screen
+char temp_data_buffer[SCREEN_BUFFER_LENGTH - 1] = {0}; // Temp buffer that gets sent to main buffer once full
 int current_line_number = 0;
-uint8_t current_data_screen = 0;
+int current_data_screen = 0;
 int encoder_index = 0;
 
+// Screen related variables
 painter_device_t oled_display;
 painter_font_handle_t display_font;
 painter_font_handle_t display_font_big;
@@ -20,7 +22,10 @@ painter_image_handle_t boot_splash;
 uint32_t hid_timer;
 uint32_t screen_timer;
 bool display_updated = false;
-bool is_screen_timeout = false;
+
+// Buffer helper functions. text_to_buffer zeroes out a line in the buffer and then writes the
+// text to the buffer. it doesn't touch the rest of the buffer.
+// clear_buffer zeroes out the whole buffer.
 
 void text_to_buffer(char *text, char *buffer, int length, int line_number) {
     memset(&buffer[line_number * SCREEN_NUM_CHARS], 0, SCREEN_NUM_CHARS);
@@ -31,15 +36,30 @@ void clear_buffer(char *buffer) {
     memset(&buffer, 0, sizeof(buffer));
 }
 
+// Initialize the screen. This function gets called right after keyboard is done booting up.
+
 void initialize_screen(void) {
     boot_splash = qp_load_image_mem(gfx_rsz_experience);
     oled_display = qp_sh1106_make_i2c_device(OLED_WIDTH, OLED_HEIGHT, OLED_I2C_ADDRESS);
     display_font = qp_load_font_mem(font_jetbrains);
     display_font_big = qp_load_font_mem(font_jetbrains_big);
     qp_power(oled_display, 1);
+    show_splash();
+}
+
+// Various functions to write stuff to the display.
+// - show_splash shows the splash.
+// - display_write writes the screen_data_buffer, line by line, to the display, starting at the indicated
+//   data screen index.
+// - display_write_big writes the first two lines of the screen_data_buffer to the display. it is only
+//   used for the shutdown notice. uses the big font.
+
+void show_splash(void) {
+    qp_clear(oled_display);
     qp_init(oled_display, QP_ROTATION_0);
     qp_drawimage(oled_display, 0, 0, boot_splash);
-    screen_timer = timer_read32();
+    clear_buffer(screen_data_buffer);
+    clear_buffer(temp_data_buffer);
 }
 
 void display_write(int start) {
@@ -60,7 +80,7 @@ void display_write_big(void) {
     }
 }
 
-
+// Choose the screen to be displayed using the rotary encoder
 void enc_counter(bool reverse) {
     // Range from 0 to NUM_SCREENS - 1
     if (!reverse) {
@@ -75,40 +95,6 @@ void enc_counter(bool reverse) {
     current_data_screen = encoder_index;
     display_write(current_data_screen * 4);
 }
-
-void check_screen_timeout(void) {
-    if (!is_screen_timeout && timer_elapsed32(screen_timer) > SCREEN_TIMEOUT) {
-        is_screen_timeout = true;
-        qp_power(oled_display, 0);
-    }
-}
-
-void check_hid_timeout(void) {
-    if (display_updated && timer_elapsed32(hid_timer) > HID_TIMEOUT) {
-        qp_clear(oled_display);
-        qp_drawimage(oled_display, 0, 0, boot_splash);
-        clear_buffer(screen_data_buffer);
-        clear_buffer(temp_data_buffer);
-        display_updated = false;
-    }
-}
-
-void process_timeout(void) {
-    screen_timer = timer_read32();
-    is_screen_timeout = false;
-    qp_power(oled_display, 1);
-}
-
-
-void shutdown_screen(bool jump_to_bootloader) {
-    if (jump_to_bootloader) {
-        text_to_buffer("Awaiting", screen_data_buffer, 8, 0);
-        text_to_buffer("Firmware", screen_data_buffer, 8, 1);
-        display_write_big();
-    }
-    qp_flush(oled_display);
-}
-
 
 void process_hid_data(uint8_t *data, uint8_t length) {
     /********************************************************************************************************
@@ -136,13 +122,36 @@ void process_hid_data(uint8_t *data, uint8_t length) {
     current_line_number++;
 
     if (current_line_number >= SCREEN_NUM_LINES * NUM_SCREENS) {
+        display_updated = true;
         clear_buffer(screen_data_buffer);
         memcpy(screen_data_buffer, temp_data_buffer, sizeof(temp_data_buffer));
         current_line_number = 0;
         clear_buffer(temp_data_buffer);
         display_write(current_data_screen * 4);
-        display_updated = true;
     }
+}
+
+// Timeout functions
+
+void check_hid_timeout(void) {
+    if (display_updated && timer_elapsed32(hid_timer) > HID_TIMEOUT) {
+        show_splash();
+        display_updated = false;
+    }
+}
+
+void wake_from_screen_timeout(void) {
+    qp_power(oled_display, 1);
+}
+
+// Write "Awaiting Firmware" to the OLED before rebooting into bootloader mode
+void shutdown_screen(bool jump_to_bootloader) {
+    if (jump_to_bootloader) {
+        text_to_buffer("Awaiting", screen_data_buffer, 8, 0);
+        text_to_buffer("Firmware", screen_data_buffer, 8, 1);
+        display_write_big();
+    }
+    qp_flush(oled_display);
 }
 
 
