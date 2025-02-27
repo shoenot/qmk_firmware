@@ -17,7 +17,8 @@
 #define SCREEN_NUM_CHARS 19
 #define NUM_SCREENS 4
 #define SCREEN_BUFFER_LENGTH (SCREEN_NUM_CHARS * SCREEN_NUM_LINES * NUM_SCREENS + 1)
-#define SCREEN_TIMEOUT 60000
+#define HID_TIMEOUT 5000
+#define SCREEN_TIMEOUT 10000
 
 enum custom_keycodes {
     KC_P00 = SAFE_RANGE,
@@ -50,7 +51,6 @@ const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][NUM_DIRECTIONS] = {
 
 char screen_data_buffer[SCREEN_BUFFER_LENGTH - 1] = {0};
 char temp_data_buffer[SCREEN_BUFFER_LENGTH - 1] = {0};
-bool display_updated = false;
 int current_line_number = 0;
 uint8_t current_data_screen = 0;
 
@@ -58,7 +58,10 @@ painter_device_t oled_display;
 painter_font_handle_t display_font;
 painter_font_handle_t display_font_big;
 painter_image_handle_t boot_splash;
+uint32_t hid_timer;
 uint32_t screen_timer;
+bool display_updated = false;
+bool is_screen_timeout = false;
 
 void text_to_buffer(char *text, char *buffer, int length, int line_number) {
     memset(&buffer[line_number * SCREEN_NUM_CHARS], 0, SCREEN_NUM_CHARS);
@@ -77,14 +80,17 @@ void keyboard_post_init_kb(void) {
     qp_power(oled_display, 1);
     qp_init(oled_display, QP_ROTATION_0);
     qp_drawimage(oled_display, 0, 0, boot_splash);
+    screen_timer = timer_read32();
 }
 
 
 void display_write(int start) {
-    screen_timer = timer_read32();
-    qp_clear(oled_display);
-    for (int i = start, j = 0; i < start + SCREEN_NUM_LINES; i++, j++) {
-        qp_drawtext(oled_display, 0, j * 16, display_font, (char *)&screen_data_buffer[i * SCREEN_NUM_CHARS]);
+    hid_timer = timer_read32();
+    if (display_updated) {
+        qp_clear(oled_display);
+        for (int i = start, j = 0; i < start + SCREEN_NUM_LINES; i++, j++) {
+            qp_drawtext(oled_display, 0, j * 16, display_font, (char *)&screen_data_buffer[i * SCREEN_NUM_CHARS]);
+        }
     }
 }
 
@@ -119,7 +125,7 @@ void raw_hid_receive(uint8_t *data, uint8_t length) {
 
       | - | - - - - - - - - - - - - - - - - - - | - - - - - - - - - - - - - - - |
 
-      First byte is either a 0 or a 1. 1 indicates that it is the first of 4 reports, or the first line.
+      First byte is either a 0x01 or a 0x02. 1 indicates that it is the first of the reports, or the first line.
       When the first byte is a 1, the temp_data_buffer is cleared and the line number is reset.
       This is to account for times when the communication is interrupted mid-screen, so after comms are
       reestablished, we want to clear the temp buffer even if its not fully filled.
@@ -133,11 +139,9 @@ void raw_hid_receive(uint8_t *data, uint8_t length) {
     if (data[0] == '\01') {
         clear_buffer(temp_data_buffer);
         current_line_number = 0;
-        text_to_buffer((char *)&data[1], temp_data_buffer, SCREEN_NUM_CHARS, current_line_number);
-    } else {
-        text_to_buffer((char *)&data[1] + sizeof(uint8_t), temp_data_buffer, SCREEN_NUM_CHARS + 1, current_line_number);
     }
 
+    text_to_buffer((char *)&data[1], temp_data_buffer, SCREEN_NUM_CHARS, current_line_number);
     current_line_number++;
 
     if (current_line_number >= SCREEN_NUM_LINES * NUM_SCREENS) {
@@ -150,8 +154,8 @@ void raw_hid_receive(uint8_t *data, uint8_t length) {
     }
 }
 
-void check_screen_timeout(void) {
-    if (display_updated && timer_elapsed32(screen_timer) > SCREEN_TIMEOUT) {
+void check_hid_timeout(void) {
+    if (display_updated && timer_elapsed32(hid_timer) > HID_TIMEOUT) {
         qp_clear(oled_display);
         qp_drawimage(oled_display, 0, 0, boot_splash);
         clear_buffer(screen_data_buffer);
@@ -160,7 +164,16 @@ void check_screen_timeout(void) {
     }
 }
 
+
+void check_screen_timeout(void) {
+    if (!is_screen_timeout && timer_elapsed32(screen_timer) > SCREEN_TIMEOUT) {
+        is_screen_timeout = true;
+        qp_power(oled_display, 0);
+    }
+}
+
 void housekeeping_task_user(void) {
+    check_hid_timeout();
     check_screen_timeout();
 }
 
@@ -189,6 +202,9 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
                 enc_counter(true);
                 return false;
         }
+        screen_timer = timer_read32();
+        is_screen_timeout = false;
+        qp_power(oled_display, 1);
     }
     return true;
 }
