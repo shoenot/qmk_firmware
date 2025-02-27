@@ -43,6 +43,7 @@ void initialize_screen(void) {
     oled_display = qp_sh1106_make_i2c_device(OLED_WIDTH, OLED_HEIGHT, OLED_I2C_ADDRESS);
     display_font = qp_load_font_mem(font_jetbrains);
     display_font_big = qp_load_font_mem(font_jetbrains_big);
+    qp_init(oled_display, QP_ROTATION_0);
     qp_power(oled_display, 1);
     show_splash();
 }
@@ -56,7 +57,6 @@ void initialize_screen(void) {
 
 void show_splash(void) {
     qp_clear(oled_display);
-    qp_init(oled_display, QP_ROTATION_0);
     qp_drawimage(oled_display, 0, 0, boot_splash);
     clear_buffer(screen_data_buffer);
     clear_buffer(temp_data_buffer);
